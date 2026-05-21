@@ -1,82 +1,28 @@
-/*
- * The MIT License
- *
- * Copyright 2024 Alvaro Salazar <alvaro@denkitronik.com>.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+#include "secrets.h"
+#include <cstdlib>
 
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>
-#include <time.h>
-#include <Arduino.h>
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>
-#include <libiot.h>
-#include <libwifi.h>
-#include <stdio.h>
+// Use distinct variable names to avoid macro/name collisions when
+// values are provided via build-system macros (e.g. -D flags).
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
 
-/*********** Inicio de parametros configurables por el usuario *********/
+const char* WIFI_SSID_VALUE = STR(WIFI_SSID);
+const char* WIFI_PASSWORD_VALUE = STR(WIFI_PASSWORD);
 
-// Variables de entorno - se configuran en platformio.ini o .env
-// Los topicos deben tener la estructura: <país>/<estado>/<ciudad>/<usuario>/out
-// NOTA: Estas macros se definen desde el script add_env_defines.py usando variables del .env
-// Si no están definidas, se usan valores por defecto
-#ifndef COUNTRY
-#define COUNTRY "colombia"                        ///< País (definir vía .env)
-#endif
-#ifndef STATE
-#define STATE "valle"                           ///< Estado/Departamento (definir vía .env)
-#endif
-#ifndef CITY
-#define CITY "tulua"                            ///< Ciudad (definir vía .env)
-#endif
-// MQTT_SERVER se define desde add_env_defines.py
-// Si no está definido, usar valor por defecto vacío
-#ifndef MQTT_SERVER
-#define MQTT_SERVER ""
-#endif
-#ifndef MQTT_PORT
-#define MQTT_PORT 8883                            ///< Puerto seguro (TLS)
-#endif
-#ifndef MQTT_USER
-#define MQTT_USER "alvaro"                        ///< Usuario MQTT (definir vía .env)
-#endif
-#ifndef MQTT_PASSWORD
-#define MQTT_PASSWORD "supersecreto"              ///< Contraseña MQTT (definir vía .env)
-#endif
+const char* MQTT_SERVER_VALUE = STR(MQTT_SERVER);
+const int MQTT_PORT_VALUE = 8883;
 
-// Variables de configuración de la red WiFi
-#ifndef WIFI_SSID
-#define WIFI_SSID "MI_RED_WIFI"                ///< SSID por defecto; usar aprovisionamiento
-#endif
-#ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD "a1b2c3d4"                  ///< Password por defecto; usar aprovisionamiento
-#endif
+const char* MQTT_USER_VALUE = STR(MQTT_USER);
+const char* MQTT_PASSWORD_VALUE = STR(MQTT_PASSWORD);
 
-// Alias para compatibilidad con el código existente
-#define SSID WIFI_SSID
-#define PASSWORD WIFI_PASSWORD
+#ifndef MQTT_TOPIC_SUB
+#define MQTT_TOPIC_SUB "sigmotos/in"
+#endif
+const char* MQTT_TOPIC_SUB_VALUE = MQTT_TOPIC_SUB;
 
-// Certificado raíz - se configura como variable de entorno
-#ifndef ROOT_CA
-#define ROOT_CA "-----BEGIN CERTIFICATE-----\n" \
+// Let's Encrypt ISRG Root X1 Certificate
+const char* root_ca = \
+"-----BEGIN CERTIFICATE-----\n" \
 "MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw\n" \
 "TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh\n" \
 "cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4\n" \
@@ -106,38 +52,31 @@
 "4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA\n" \
 "mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d\n" \
 "emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=\n" \
-"-----END CERTIFICATE-----"                     ///< CA vacía por defecto; definir vía .env
+"-----END CERTIFICATE-----\n";
+
+// Definiciones de las variables que usan las librerías libwifi y libiot
+const char* ssid = WIFI_SSID_VALUE;
+const char* password = WIFI_PASSWORD_VALUE;
+const char* mqtt_server = MQTT_SERVER_VALUE;
+const int mqtt_port = MQTT_PORT_VALUE;
+const char* mqtt_user = MQTT_USER_VALUE;
+const char* mqtt_password = MQTT_PASSWORD_VALUE;
+
+#undef MQTT_TOPIC_SUB
+const char* MQTT_TOPIC_SUB = MQTT_TOPIC_SUB_VALUE;
+
+#ifndef COUNTRY
+#define COUNTRY "colombia"
+#endif
+#ifndef STATE
+#define STATE "valle"
+#endif
+#ifndef CITY
+#define CITY "tulua"
+#endif
+#ifndef MQTT_USER
+#define MQTT_USER "admin"
 #endif
 
-const char* root_ca = ROOT_CA;
-
-/*********** Fin de parametros configurables por el usuario ***********/
-
-
-/* Constantes de configuración del servidor MQTT, no cambiar */
-// Los defines se aplican desde add_env_defines.py
-// Si MQTT_SERVER está definido pero vacío, se usará el valor por defecto del #ifndef
-const char* mqtt_server = MQTT_SERVER;            ///< Dirección de tu servidor MQTT
-const int mqtt_port = MQTT_PORT;                  ///< Puerto seguro (TLS)
-const char* mqtt_user = MQTT_USER;                ///< Usuario MQTT
-const char* mqtt_password = MQTT_PASSWORD;        ///< Contraseña MQTT
-
-// Obtener la MAC Address
-String macAddress = getMacAddress();
-const char * client_id = macAddress.c_str();      ///< ID del cliente MQTT
-
-// Tópicos de publicación y suscripción
-String mqtt_topic_pub( String(COUNTRY) + "/" + String(STATE) + "/"+ String(CITY) + "/" + String(client_id) + "/" + String(mqtt_user) + "/out");
-String mqtt_topic_sub( String(COUNTRY) + "/" + String(STATE) + "/"+ String(CITY) + "/" + String(client_id) + "/" + String(mqtt_user) + "/in");
-
-// Convertir los tópicos a constantes de tipo char*
-const char * MQTT_TOPIC_PUB = mqtt_topic_pub.c_str();
-const char * MQTT_TOPIC_SUB = mqtt_topic_sub.c_str();
-
-long long int measureTime = millis();   // Tiempo de la última medición
-long long int alertTime = millis();     // Tiempo en que inició la última alerta
-WiFiClientSecure espClient;             // Conexión TLS/SSL con el servidor MQTT
-PubSubClient client(espClient);         // Cliente MQTT para la conexión con el servidor
-time_t now;                             // Timestamp de la fecha actual.
-const char* ssid = SSID;                // Cambia por el nombre de tu red WiFi
-const char* password = PASSWORD;        // Cambia por la contraseña de tu red WiFi
+#undef MQTT_TOPIC_PUB
+const char* MQTT_TOPIC_PUB = COUNTRY "/" STATE "/" CITY "/" MQTT_USER "/out";

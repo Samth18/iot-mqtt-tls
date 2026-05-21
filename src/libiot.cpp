@@ -45,7 +45,16 @@
 
 SHTSensor sht;     //Sensor SHT21
 String alert = ""; //Mensaje de alerta
-extern const char * client_id;  //ID del cliente MQTT
+
+// Definiciones de las variables globales declaradas en libiot.h
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
+
+time_t now = 0;
+long long int measureTime = 0;
+long long int alertTime = 0;
+
+const char* client_id = "";  // ID del cliente MQTT (se configurará en setupIoT())
 
 
 /**
@@ -179,6 +188,10 @@ void reconnect() {
  * Función setupIoT que configura el certificado raíz, el servidor MQTT y el puerto
  */
 void setupIoT() {
+  // Inicializar dinámicamente el client_id con la dirección MAC única del dispositivo
+  static String macStr = getMacAddress();
+  client_id = macStr.c_str();
+
   Wire.begin();                 //Inicializa el bus I2C: (SDA, SCL)
   espClient.setCACert(root_ca); //Configura el certificado raíz de la autoridad de certificación
   client.setServer(mqtt_server, mqtt_port);   //Configura el servidor MQTT y el puerto seguro

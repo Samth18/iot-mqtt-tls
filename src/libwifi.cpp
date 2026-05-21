@@ -83,9 +83,11 @@ void startWiFi(const char* hostname) {
   }
   
   String s, p;
+  bool usingNVS = false;
   if (loadWiFiCredentials(s, p)) {
     Serial.println("Using stored WiFi credentials from NVS");
     WiFi.begin(s.c_str(), p.c_str());
+    usingNVS = true;
   } else {
     Serial.println("Using built-in WiFi credentials (secrets.cpp)");
     WiFi.begin(ssid, password);
@@ -97,6 +99,19 @@ void startWiFi(const char* hostname) {
     delay(500);
     Serial.print(".");
     attempts++;
+  }
+  
+  // Si falló la conexión usando NVS, intentamos con las credenciales embebidas
+  if (WiFi.status() != WL_CONNECTED && usingNVS) {
+    Serial.println("\nWiFi connection failed with NVS credentials.");
+    Serial.println("Falling back to built-in WiFi credentials (secrets.cpp)...");
+    WiFi.begin(ssid, password);
+    attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+      delay(500);
+      Serial.print(".");
+      attempts++;
+    }
   }
   
   if (WiFi.status() == WL_CONNECTED) {
