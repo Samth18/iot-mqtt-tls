@@ -75,51 +75,77 @@ String getHostname() {
 }
 
 /**
- * Inicia el servicio de WiFi e intenta conectarse a la red WiFi específicada en las constantes.
+ * Inicia el servicio de WiFi usando ÚNICAMENTE las credenciales
+ * almacenadas en NVS (ingresadas a través del portal web de configuración).
+ * Si no hay credenciales almacenadas, no intenta conectarse.
  */
 void startWiFi(const char* hostname) {
+  // Asegurar que el Wi-Fi está en modo Estación (STA)
+  WiFi.mode(WIFI_STA);
+  delay(100);
+
   if (hostname && strlen(hostname) > 0) {
     WiFi.setHostname(hostname);
   }
-  
+
   String s, p;
-  bool usingNVS = false;
-  if (loadWiFiCredentials(s, p)) {
-    Serial.println("Using stored WiFi credentials from NVS");
-    WiFi.begin(s.c_str(), p.c_str());
-    usingNVS = true;
-  } else {
-    Serial.println("Using built-in WiFi credentials (secrets.cpp)");
-    WiFi.begin(ssid, password);
+  if (!loadWiFiCredentials(s, p)) {
+    Serial.println("No hay credenciales WiFi en NVS. Use el portal de configuración.");
+    return;
   }
-  
-  // Wait for connection
+
+  Serial.print("Conectando a SSID: \"");
+  Serial.print(s);
+  Serial.println("\"");
+  Serial.print("Longitud contraseña: ");
+  Serial.println(p.length());
+
+  WiFi.begin(s.c_str(), p.c_str());
+
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 25) {
     delay(500);
     Serial.print(".");
     attempts++;
   }
-  
-  // Si falló la conexión usando NVS, intentamos con las credenciales embebidas
-  if (WiFi.status() != WL_CONNECTED && usingNVS) {
-    Serial.println("\nWiFi connection failed with NVS credentials.");
-    Serial.println("Falling back to built-in WiFi credentials (secrets.cpp)...");
-    WiFi.begin(ssid, password);
-    attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-      delay(500);
-      Serial.print(".");
-      attempts++;
-    }
-  }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected");
-    Serial.print("IP address: ");
+    Serial.println("\nWiFi conectado");
+    Serial.print("Direccion IP: ");
     Serial.println(WiFi.localIP());
+    Serial.print("Gateway: ");
+    Serial.println(WiFi.gatewayIP());
+    Serial.print("DNS1: ");
+    Serial.println(WiFi.dnsIP(0));
+    Serial.print("DNS2: ");
+    Serial.println(WiFi.dnsIP(1));
+    
+    delay(500); // Esperar a que se estabilice la conexión
+    
+    // Intentar múltiples estrategias de DNS
+    Serial.println("\n--- Configurando DNS ---");
+    
+    // Estrategia 1: Usar DNS del router local
+    IPAddress localDns = WiFi.gatewayIP();
+    Serial.print("Intentando DNS del router (");
+    Serial.print(localDns);
+    Serial.println(")...");
+    
+    // Estrategia 2: Google DNS como respaldo
+    IPAddress dns1(8, 8, 8, 8);        // Google DNS primario
+    IPAddress dns2(1, 1, 1, 1);        // Cloudflare DNS secundario
+    
+    // WiFi.config() con DNS personalizado
+    WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), dns1, dns2);
+    
+    Serial.println("DNS configurado:");
+    Serial.print("  Primario (Google): ");
+    Serial.println(dns1);
+    Serial.print("  Secundario (Cloudflare): ");
+    Serial.println(dns2);
+    
   } else {
-    Serial.println("\nWiFi connection failed");
+    Serial.println("\nWiFi: fallo la conexion");
   }
 }
 

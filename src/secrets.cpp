@@ -57,7 +57,7 @@ const char* root_ca = \
 // Definiciones de las variables que usan las librerías libwifi y libiot
 const char* ssid = WIFI_SSID_VALUE;
 const char* password = WIFI_PASSWORD_VALUE;
-const char* mqtt_server = MQTT_SERVER_VALUE;
+const char* mqtt_server = "mqtt-sigmotos.mooo.com";
 const int mqtt_port = MQTT_PORT_VALUE;
 const char* mqtt_user = MQTT_USER_VALUE;
 const char* mqtt_password = MQTT_PASSWORD_VALUE;
@@ -65,6 +65,7 @@ const char* mqtt_password = MQTT_PASSWORD_VALUE;
 #undef MQTT_TOPIC_SUB
 const char* MQTT_TOPIC_SUB = MQTT_TOPIC_SUB_VALUE;
 
+// 1. Forzar la definición de macros limpias como texto literal para evitar fallos del preprocesador
 #ifndef COUNTRY
 #define COUNTRY "colombia"
 #endif
@@ -74,9 +75,11 @@ const char* MQTT_TOPIC_SUB = MQTT_TOPIC_SUB_VALUE;
 #ifndef CITY
 #define CITY "tulua"
 #endif
-#ifndef MQTT_USER
-#define MQTT_USER "admin"
-#endif
 
+// Redefinimos MQTT_USER como macro limpia para la concatenación posterior
+#undef MQTT_USER
+#define MQTT_USER "admin"
+
+// 2. Concatenación explícita de textos literales (Asegura los 6 niveles que busca Spring Boot)
 #undef MQTT_TOPIC_PUB
-const char* MQTT_TOPIC_PUB = COUNTRY "/" STATE "/" CITY "/" MQTT_USER "/out";
+const char* MQTT_TOPIC_PUB = COUNTRY "/" STATE "/" CITY "/" MQTT_USER "/dispositivo1/out";

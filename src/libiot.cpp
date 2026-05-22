@@ -65,22 +65,28 @@ time_t setTime() {
   Serial.print("Ajustando el tiempo usando SNTP");
   configTime(-5 * 3600, 0, "pool.ntp.org", "time.nist.gov"); //Configura la zona horaria y los servidores SNTP
   now = time(nullptr);              //Obtiene la hora actual
-  while (now < 1700000000) {        //Espera a que el tiempo sea mayor a 1700000000 (1 de enero de 2024)
+  int attempts = 0;
+  while (now < 1700000000 && attempts < 40) {        //Espera a que el tiempo sea mayor a 1700000000 (1 de enero de 2024)
     delay(500);                     //Espera 500ms antes de volver a intentar obtener la hora
     Serial.print(".");
     now = time(nullptr);            //Obtiene la hora actual
+    attempts++;
   }
-  Serial.println(" hecho!");
-  struct tm timeinfo;               //Estructura que almacena la información de la hora
-  gmtime_r(&now, &timeinfo);        //Obtiene la hora actual
-  Serial.print("Tiempo actual: ");  //Una vez obtiene la hora, imprime en el monitor el tiempo actual
-  Serial.print(asctime(&timeinfo));
+  if (now >= 1700000000) {
+    Serial.println(" hecho!");
+    struct tm timeinfo;               //Estructura que almacena la información de la hora
+    gmtime_r(&now, &timeinfo);        //Obtiene la hora actual
+    Serial.print("Tiempo actual: ");  //Una vez obtiene la hora, imprime en el monitor el tiempo actual
+    Serial.print(asctime(&timeinfo));
+  } else {
+    Serial.println(" fallido (timeout)!");
+  }
   return now;
 }
 
 // Variable para debugging periódico
 static unsigned long lastMQTTDebug = 0;
-static const unsigned long MQTT_DEBUG_INTERVAL = 30000; // 30 segundos
+static const unsigned long MQTT_DEBUG_INTERVAL = 5000; // 30 segundos
 
 /**
  * Conecta el dispositivo con el bróker MQTT usando
@@ -103,7 +109,7 @@ void checkMQTT() {
   unsigned long now = millis();
   if (now - lastMQTTDebug > MQTT_DEBUG_INTERVAL) {
     lastMQTTDebug = now;
-    Serial.println("=== Healthcheck MQTT (cada 30s) ===");
+    Serial.println("=== Healthcheck MQTT (cada 5s) ===");
     Serial.print("Conectado: ");
     Serial.println(client.connected() ? "✅UP" : "❌DOWN");
   }
@@ -172,12 +178,72 @@ void reconnect() {
       Serial.println("Listo para recibir mensajes MQTT");
     } else {
       Serial.println(" ✗ FALLÓ");
-      Serial.println("Problema con la conexión, revise los valores de las constantes MQTT");
       int state = client.state();
-      Serial.print("Código de error = ");
-      alert = "MQTT error: " + String(state);
+      
+      // Diagnóstico detallado del error
+      Serial.println("\n=== DIAGNÓSTICO DEL ERROR ===");
+      Serial.print("Código de error: ");
       Serial.println(state);
-      if ( client.state() == MQTT_CONNECT_UNAUTHORIZED ) ESP.deepSleep(0);
+      
+      // Mensajes descriptivos por código de error
+      switch(state) {
+        case -4:
+          Serial.println("Error: MQTT_DISCONNECTED - Desconectado");
+          break;
+        case -3:
+          Serial.println("Error: MQTT_CONNECT_FAILED - Conexión rechazada por servidor");
+          break;
+        case -2:
+          Serial.println("Error: MQTT_CONNECTION_LOST - Conexión perdida o timeout");
+          Serial.println("  → Podría ser DNS, SSL/TLS, o red");
+          break;
+        case -1:
+          Serial.println("Error: MQTT_CONNECTION_TIMEOUT - Timeout en conexión");
+          Serial.println("  → El servidor no responde en tiempo");
+          break;
+        case 0:
+          Serial.println("Error: Conexión establecida pero no autenticada");
+          break;
+        case 1:
+          Serial.println("Error: Versión de protocolo rechazada");
+          break;
+        case 2:
+          Serial.println("Error: ID de cliente rechazado");
+          break;
+        case 3:
+          Serial.println("Error: Servidor no disponible");
+          break;
+        case 4:
+          Serial.println("Error: Usuario/contraseña incorrectos");
+          break;
+        case 5:
+          Serial.println("Error: No autorizado");
+          break;
+        default:
+          Serial.println("Error desconocido");
+      }
+      
+      // Información de diagnóstico
+      Serial.println("\n=== INFO DIAGNÓSTICO ===");
+      Serial.print("WiFi conectado: ");
+      Serial.println(WiFi.status() == WL_CONNECTED ? "✅SÍ" : "❌NO");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+      Serial.print("DNS primario: ");
+      Serial.println(WiFi.dnsIP(0));
+      Serial.print("Señal WiFi (RSSI): ");
+      Serial.print(WiFi.RSSI());
+      Serial.println(" dBm");
+      
+      alert = "MQTT error: " + String(state);
+      
+      if ( client.state() == MQTT_CONNECT_UNAUTHORIZED ) {
+        Serial.println("\n⚠️  Espera profunda de 30s por error de autorización...");
+        delay(2000);
+        ESP.deepSleep(30e6); // 30 segundos en microsegundos
+      }
+      
+      Serial.println("=== Reintentando en 5s... ===\n");
       delay(5000); // Espera 5 segundos antes de volver a intentar
     }
   }
@@ -193,14 +259,21 @@ void setupIoT() {
   client_id = macStr.c_str();
 
   Wire.begin();                 //Inicializa el bus I2C: (SDA, SCL)
+  
+  Serial.println("\n=== SETUP TLS/SSL ===");
+  Serial.println("Configurando certificado raíz CA...");
   espClient.setCACert(root_ca); //Configura el certificado raíz de la autoridad de certificación
+  Serial.println("✓ Certificado raíz configurado");
+  
+  // Configuración de MQTT
   client.setServer(mqtt_server, mqtt_port);   //Configura el servidor MQTT y el puerto seguro
   
   // Configurar buffer más grande para mensajes grandes (por defecto es 256 bytes)
   client.setBufferSize(1024);
   
   client.setCallback(receivedCallback);       //Configura la función que se ejecutará cuando lleguen mensajes a la suscripción
-  Serial.println("=== Configuración MQTT ===");
+  
+  Serial.println("\n=== Configuración MQTT ===");
   Serial.print("Servidor MQTT: ");
   Serial.println(mqtt_server);
   Serial.print("Puerto MQTT: ");
@@ -212,7 +285,23 @@ void setupIoT() {
   Serial.print("Buffer size: ");
   Serial.println(client.getBufferSize());
   Serial.println("Callback MQTT configurado: receivedCallback");
-  Serial.println("==========================");
+  
+  // TEST DE CONECTIVIDAD
+  Serial.println("\n=== TEST DE CONECTIVIDAD ===");
+  Serial.print("Probando conexión TCP a ");
+  Serial.print(mqtt_server);
+  Serial.print(":");
+  Serial.println(mqtt_port);
+  
+  if (espClient.connect(mqtt_server, mqtt_port)) {
+    Serial.println("✓ Conexión TCP exitosa");
+    espClient.stop();
+  } else {
+    Serial.println("✗ Falló conexión TCP - Podría ser firewall o puerto incorrecto");
+  }
+  
+  Serial.println("==========================\n");
+  
   setTime();                    //Ajusta el tiempo del dispositivo con servidores SNTP
   setupSHT();                   //Configura el sensor SHT21
 }

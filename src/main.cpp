@@ -83,6 +83,14 @@ void setup() {
     displayConnecting(ssid);
   }
   startWiFi("");            // Paso 5. Inicializa el servicio de WiFi
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nWiFi connection failed! Re-entering Provisioning AP mode...");
+    displayConnecting("Error WiFi -> Setup AP");
+    startProvisioningAP();
+    return; // el loop manejará el portal
+  }
+  
   setupIoT();               // Paso 6. Inicializa el servicio de IoT
   hora = setTime();         // Paso 7. Ajusta el tiempo del dispositivo con servidores SNTP
   
